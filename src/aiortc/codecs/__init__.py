@@ -83,6 +83,7 @@ def init_codecs() -> None:
         dynamic_pt += 2
 
     add_video_codec("video/VP8")
+    add_video_codec("video/VP8TS")
     for profile_level_id in ("42001f", "42e01f"):
         add_video_codec(
             "video/H264",
@@ -95,7 +96,7 @@ def init_codecs() -> None:
 
 
 def depayload(codec: RTCRtpCodecParameters, payload: bytes) -> bytes:
-    if codec.name == "VP8":
+    if codec.name in ["VP8", "VP8TS"]:
         return vp8_depayload(payload)
     elif codec.name == "H264":
         return h264_depayload(payload)
@@ -148,6 +149,8 @@ def get_decoder(codec: RTCRtpCodecParameters) -> Decoder:
         return H264Decoder()
     elif mimeType == "video/vp8":
         return Vp8Decoder()
+    elif mimeType == "video/vp8ts":
+        return Vp8Decoder(timestamped=True)
     else:
         raise ValueError(f"No decoder found for MIME type `{mimeType}`")
 
@@ -165,6 +168,8 @@ def get_encoder(codec: RTCRtpCodecParameters) -> Encoder:
         return H264Encoder()
     elif mimeType == "video/vp8":
         return Vp8Encoder()
+    elif mimeType == "video/vp8ts":
+        return Vp8Encoder(timestamped=True)
     else:
         raise ValueError(f"No encoder found for MIME type `{mimeType}`")
 

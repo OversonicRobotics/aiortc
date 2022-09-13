@@ -124,6 +124,10 @@ def player_worker_decode(
                 asyncio.run_coroutine_threadsafe(video_track._queue.put(None), loop)
             break
 
+        # add timestamp to side_data attribute since Frame is a c object (and it doesn't accept new attributes)
+        # side_data is not meant to be used in this way, but it's the fastest way I found
+        frame.side_data.timestamp = int(time.time()*1000)
+
         # read up to 1 second ahead
         if throttle_playback:
             elapsed_time = time.time() - start_time

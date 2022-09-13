@@ -1,7 +1,7 @@
 import multiprocessing
 import random
 from struct import pack, unpack_from
-from typing import List, Tuple, Type, TypeVar, cast
+from typing import List, Tuple, Type, TypeVar, cast, Literal
 
 from av import VideoFrame
 from av.frame import Frame
@@ -18,6 +18,10 @@ MAX_BITRATE = 1500000  # 1.5 Mbps
 
 MAX_FRAME_RATE = 30
 PACKET_MAX = 1300
+
+TIMESTAMP_LENGTH: int = 8  # bytes
+TIMESTAMP_BYTES_ORDER: Literal[
+    "little", "big"] = 'big'  # big or little, no difference until the very same is used both in encoding and decoding
 
 DESCRIPTOR_T = TypeVar("DESCRIPTOR_T", bound="VpxPayloadDescriptor")
 
@@ -169,7 +173,7 @@ def _vpx_assert(err: int) -> None:
 
 
 class Vp8Decoder(Decoder):
-    def __init__(self) -> None:
+    def __init__(self, timestamped: bool = False) -> None:
         self.codec = ffi.new("vpx_codec_ctx_t *")
         _vpx_assert(
             lib.vpx_codec_dec_init(self.codec, lib.vpx_codec_vp8_dx(), ffi.NULL, 0)
@@ -180,18 +184,31 @@ class Vp8Decoder(Decoder):
         ppcfg.deblocking_level = 3
         lib.vpx_codec_control_(self.codec, lib.VP8_SET_POSTPROC, ppcfg)
 
+        self._timestamped = timestamped
+
     def __del__(self) -> None:
         lib.vpx_codec_destroy(self.codec)
 
     def decode(self, encoded_frame: JitterFrame) -> List[Frame]:
         frames: List[Frame] = []
-        result = lib.vpx_codec_decode(
-            self.codec,
-            encoded_frame.data,
-            len(encoded_frame.data),
-            ffi.NULL,
-            lib.VPX_DL_REALTIME,
-        )
+        if self._timestamped:
+            result = lib.vpx_codec_decode(
+                self.codec,
+                encoded_frame.data[:-TIMESTAMP_LENGTH],
+                len(encoded_frame.data) - TIMESTAMP_LENGTH,
+                ffi.NULL,
+                lib.VPX_DL_REALTIME,
+            )
+            timestamp = int.from_bytes(encoded_frame.data[-TIMESTAMP_LENGTH:], TIMESTAMP_BYTES_ORDER)
+        else:
+            result = lib.vpx_codec_decode(
+                self.codec,
+                encoded_frame.data,
+                len(encoded_frame.data),
+                ffi.NULL,
+                lib.VPX_DL_REALTIME,
+            )
+            timestamp = None
         if result == lib.VPX_CODEC_OK:
             it = ffi.new("vpx_codec_iter_t *")
             while True:
@@ -221,13 +238,15 @@ class Vp8Decoder(Decoder):
                         i_pos += i_stride
                         o_pos += o_stride
 
+                frame.side_data.timestamp = timestamp
+
                 frames.append(frame)
 
         return frames
 
 
 class Vp8Encoder(Encoder):
-    def __init__(self) -> None:
+    def __init__(self, timestamped: bool = False) -> None:
         self.cx = lib.vpx_codec_vp8_cx()
 
         self.cfg = ffi.new("vpx_codec_enc_cfg_t *")
@@ -240,6 +259,8 @@ class Vp8Encoder(Encoder):
         self.__target_bitrate = DEFAULT_BITRATE
         self.__update_config_needed = False
 
+        self._timestamped = timestamped
+
     def __del__(self) -> None:
         if self.codec:
             lib.vpx_codec_destroy(self.codec)
@@ -248,6 +269,8 @@ class Vp8Encoder(Encoder):
         self, frame: Frame, force_keyframe: bool = False
     ) -> Tuple[List[bytes], int]:
         assert isinstance(frame, VideoFrame)
+        # save timestamp because it is lost during frame manipulation
+        timestamp = frame.side_data.timestamp
         if frame.format.name != "yuv420p":
             frame = frame.reformat(format="yuv420p")
 
@@ -347,6 +370,16 @@ class Vp8Encoder(Encoder):
                     pkt.data.frame.buf, pkt.data.frame.sz
                 )
                 length += pkt.data.frame.sz
+
+        if self._timestamped:
+            # append timestamp, resizing buffer if needed
+            if length + TIMESTAMP_LENGTH > len(self.buffer):
+                new_buffer = bytearray(length + TIMESTAMP_LENGTH)
+                new_buffer[0:length] = self.buffer[0:length]
+                self.buffer = new_buffer
+            self.buffer[length: length + TIMESTAMP_LENGTH] = timestamp.to_bytes(TIMESTAMP_LENGTH,
+                                                                                TIMESTAMP_BYTES_ORDER)
+            length += TIMESTAMP_LENGTH
 
         # packetize
         payloads = self._packetize(self.buffer[:length], self.picture_id)
