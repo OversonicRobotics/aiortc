@@ -269,8 +269,9 @@ class Vp8Encoder(Encoder):
         self, frame: Frame, force_keyframe: bool = False
     ) -> Tuple[List[bytes], int]:
         assert isinstance(frame, VideoFrame)
-        # save timestamp because it is lost during frame manipulation
-        timestamp = frame.side_data.timestamp
+        if self._timestamped:
+            # save timestamp because it is lost during frame manipulation
+            timestamp = frame.side_data.timestamp
         if frame.format.name != "yuv420p":
             frame = frame.reformat(format="yuv420p")
 
