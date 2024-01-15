@@ -304,7 +304,7 @@ class MediaPlayer:
     """
 
     def __init__(
-        self, file, format=None, options={}, timeout=None, loop=False, decode=True
+        self, file, format=None, options=None, timeout=None, loop=False, decode=True
     ):
         self.__container = av.open(
             file=file, format=format, mode="r", options=options, timeout=timeout
@@ -422,7 +422,7 @@ class MediaRecorder:
     :param options: Additional options to pass to FFmpeg.
     """
 
-    def __init__(self, file, format=None, options={}):
+    def __init__(self, file, format=None, options=None):
         self.__container = av.open(file=file, format=format, mode="w", options=options)
         self.__tracks = {}
 
@@ -433,7 +433,7 @@ class MediaRecorder:
         :param track: A :class:`aiortc.MediaStreamTrack`.
         """
         if track.kind == "audio":
-            if self.__container.format.name in ("wav", "alsa"):
+            if self.__container.format.name in ("wav", "alsa", "pulse"):
                 codec_name = "pcm_s16le"
             elif self.__container.format.name == "mp3":
                 codec_name = "mp3"
@@ -493,7 +493,7 @@ class MediaRecorder:
 
 
 class RelayStreamTrack(MediaStreamTrack):
-    def __init__(self, relay, source: MediaStreamTrack, buffered) -> None:
+    def __init__(self, relay, source: MediaStreamTrack, buffered: bool) -> None:
         super().__init__()
         self.kind = source.kind
         self._relay = relay
@@ -552,8 +552,9 @@ class MediaRelay:
         """
         Create a proxy around the given `track` for a new consumer.
 
-        :param track: Source :class:`MediaStreamTrack` which is relayed
-        :param buffered: Whether there need a buffer between the source track and relayed track
+        :param track: Source :class:`MediaStreamTrack` which is relayed.
+        :param buffered: Whether there need a buffer between the source track and
+            relayed track.
 
         :rtype: :class: MediaStreamTrack
         """
